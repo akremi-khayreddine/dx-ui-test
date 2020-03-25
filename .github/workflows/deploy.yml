@@ -1,0 +1,97 @@
+name: Test
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+jobs:
+  setup:
+    name: Setup
+    if: github.workflow == github.event.client_payload.next_workflow.id
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        if: always()
+
+      - name: Load config (env)
+        if: always()
+        id: env
+        uses: distinctlab/dx-actions-loader@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        with:
+          private_action: distinctlab/dx-actions-config@master
+          path: config.json
+          version: ${{ github.event.client_payload.version }}
+
+      - name: Webhook Action
+        uses: distinctlab/dx-actions-loader@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        with:
+          private_action: distinctlab/dx-actions-webhook@master
+          job_name: 'Setup'
+          job_status: ${{ job.status }}
+          next_job: 'Deploy'
+          run_id: ${{ github.run_id }}
+          pipeline_id: ${{ steps.env.outputs.REPO_NAME }}
+          job_payload: '{ "version": "${{ steps.env.outputs.VERSION }}", "app_url":"${{ steps.env.outputs.APP_URL }}", "artifact_name":"${{ steps.env.outputs.ARTIFACT_NAME }}", "artifact_url": "${{ steps.env.outputs.ARTIFACT_URL }}" }'
+
+  deploy:
+    name: Deploy
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        if: always()
+
+      - name: Load config (env)
+        if: always()
+        id: env
+        uses: distinctlab/dx-actions-loader@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        with:
+          private_action: distinctlab/dx-actions-config@master
+          path: config.json
+          version: ${{ github.event.client_payload.version }}
+
+      - name: Download Release Asset
+        env:
+          TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          REPO: distinctlab/dx-ui
+          VERSION: ${{ steps.env.outputs.VERSION }}
+          FILE: ${{ steps.env.outputs.ARTIFACT_NAME }}
+          OUTPUT: ${{ github.workspace }}/${{ steps.env.outputs.APP_DIST }}
+        run: |
+          chmod -R +x ${{ github.workspace }}
+          mkdir -v -p ${{ github.workspace }}/${{ steps.env.outputs.APP_DIST }}
+          ${{ steps.env.outputs.SCRIPTS_PATH }}/download-release-asset.sh  
+          tar -xf ${{ github.workspace }}/${{ steps.env.outputs.APP_DIST }}/${{ steps.env.outputs.ARTIFACT_NAME }}
+      - name: Deploy Firebase App
+        uses: distinctlab/dx-actions-loader@master
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        with:
+          private_action: distinctlab/dx-actions-firebase@master
+          version: ${{ steps.env.outputs.VERSION }}
+          app_dist: ${{ steps.env.outputs.APP_DIST }}
+          firebase_project: ${{ steps.env.outputs.FIREBASE_PROJECT }}
+          firebase_target: ${{ steps.env.outputs.FIREBASE_TARGET }}
+          firebase_hosting: ${{ steps.env.outputs.FIREBASE_HOSTING }}
+          firebase_predeploy: ${{ steps.env.outputs.FIREBASE_PREDEPLOY }}
+          firebase_postdeploy: ${{ steps.env.outputs.FIREBASE_POSTDEPLOY }}
+
+      - name: Webhook Action
+        if: always()
+        uses: distinctlab/dx-actions-loader@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        with:
+          private_action: distinctlab/dx-actions-webhook@master
+          job_name: 'Deploy'
+          job_status: ${{ job.status }}
+          run_id: ${{ github.run_id }}
+          pipeline_id: ${{ steps.env.outputs.REPO_NAME }}
+          job_payload: '{ "version": "${{ steps.env.outputs.VERSION }}", "app_url":"${{ steps.env.outputs.APP_URL }}", "artifact_name":"${{ steps.env.outputs.ARTIFACT_NAME }}", "artifact_url": "${{ steps.env.outputs.ARTIFACT_URL }}" }'
